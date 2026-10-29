@@ -19,3 +19,9 @@ Extensión de Chrome (Manifest V3) que detecta los videos que se reproducen en V
 - Manifest DASH de SharePoint: se intenta pedir la variante HLS. DASH puro (`.mpd`) no está soportado.
 
 Úsalo solo con contenido al que tengas acceso y permiso para descargar según las políticas de tu empresa.
+
+## Videos "blob:" (Media Source Extensions)
+Si el reproductor usa una fuente `blob:`, la extensión captura los trozos que el reproductor alimenta al buffer.
+Recarga la página (F5), pulsa "Reproducir rápido" en el popup, espera a que llegue al final y pulsa "Guardar captura".
+Si audio y video vienen por separado se guardan dos archivos; únelos con:
+`ffmpeg -i x_video.mp4 -i x_audio.m4a -c copy final.mp4`
