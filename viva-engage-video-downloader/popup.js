@@ -11,11 +11,6 @@ function fileName(ext) {
 }
 
 function download(item) {
-  if (item.type === "file") {
-    const ext = (item.url.split("?")[0].match(/\.(mp4|m4v|mov|webm)$/i) || [, "mp4"])[1];
-    chrome.downloads.download({ url: item.url, filename: fileName(ext) });
-    return;
-  }
   // HLS/DASH need segment downloading: done in a full tab so it survives the popup closing.
   const q = new URLSearchParams({ u: item.url, t: item.type, n: fileName("mp4") });
   chrome.tabs.create({ url: chrome.runtime.getURL("downloader.html?" + q) });

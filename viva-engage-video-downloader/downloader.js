@@ -108,8 +108,40 @@ async function downloadPlaylist(url, name) {
   save(parts, name.replace(/\.mp4$/i, fmp4 ? ".mp4" : ".ts"), fmp4 ? "video/mp4" : "video/mp2t");
 }
 
+async function downloadFile(url) {
+  const r = await fetch(url, { credentials: "include" });
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const total = Number(r.headers.get("content-length")) || 0;
+  const chunks = [];
+  let got = 0;
+  const reader = r.body.getReader();
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    got += value.length;
+    if (total) $("bar").value = got / total;
+    status(`${(got / 1048576).toFixed(1)} MB${total ? " / " + (total / 1048576).toFixed(1) + " MB" : ""}`);
+  }
+  const head = chunks[0] || new Uint8Array();
+  const tag = String.fromCharCode(...head.slice(4, 8));
+  const ct = r.headers.get("content-type") || "";
+  log(`content-type: ${ct}; tamano: ${got} bytes; bytes iniciales: ${[...head.slice(0, 12)].map((b) => b.toString(16)).join(" ")}`);
+  if (head[0] === 0x3c || ct.includes("text/html")) throw new Error("El servidor devolvio una pagina HTML (login/proxy), no un video.");
+  if (head[0] === 0x1a && head[1] === 0x45) return save(chunks, outName.replace(/\.mp4$/i, ".webm"), "video/webm");
+  if (!["ftyp", "styp", "moof", "moov"].includes(tag)) log("Aviso: no parece un MP4 estandar; prueba con VLC.");
+  if (tag === "moof" || tag === "styp") log("Aviso: es un fragmento (sin cabecera moov); puede no abrir en QuickTime.");
+  save(chunks, outName, "video/mp4");
+}
+
 async function run() {
   let url = srcUrl;
+  if (kind === "file") {
+    await downloadFile(url);
+    $("title").textContent = "Listo";
+    status("Descarga completada. Revisa el registro de abajo si no abre.");
+    return;
+  }
   if (kind === "dash") {
     // SharePoint/Stream manifests can usually also be served as HLS.
     const u = new URL(url);
