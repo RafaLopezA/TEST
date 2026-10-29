@@ -6,8 +6,17 @@ const $ = (id) => document.getElementById(id);
 const status = (s) => ($("status").textContent = s);
 const log = (s) => ($("log").textContent += s + "\n");
 
+let authHeader = null;
+async function loadAuth() {
+  const all = await chrome.storage.session.get(null);
+  for (const items of Object.values(all)) {
+    const hit = Array.isArray(items) && items.find((i) => i.url === srcUrl);
+    if (hit) authHeader = hit.auth;
+  }
+}
+
 async function fetchOk(url, type) {
-  const r = await fetch(url, { credentials: "include" });
+  const r = await fetch(url, { credentials: "include", headers: authHeader ? { Authorization: authHeader } : {} });
   if (!r.ok) throw new Error(`HTTP ${r.status} en ${url.slice(0, 120)}`);
   return type === "text" ? r.text() : r.arrayBuffer();
 }
@@ -136,6 +145,8 @@ async function downloadFile(url) {
 
 async function run() {
   let url = srcUrl;
+  await loadAuth();
+  log(`Authorization capturada: ${authHeader ? "si" : "no"}`);
   if (kind === "file") {
     await downloadFile(url);
     $("title").textContent = "Listo";
@@ -146,6 +157,8 @@ async function run() {
     // SharePoint/Stream manifests can usually also be served as HLS.
     const u = new URL(url);
     if (/videomanifest/i.test(u.pathname) && u.searchParams.has("format")) {
+      const probe = await fetch(url, { credentials: "include", headers: authHeader ? { Authorization: authHeader } : {} });
+      log(`Manifest original: HTTP ${probe.status}`);
       u.searchParams.set("format", "hls");
       url = u.href;
       log("Manifest DASH detectado; intentando versión HLS (format=hls).");

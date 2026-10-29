@@ -39,6 +39,7 @@ function addItem(tabId, item) {
     if (existing) {
       if (item.size > existing.size) existing.size = item.size;
       existing.url = item.url; // keep the freshest signed URL
+      if (item.auth) existing.auth = item.auth;
     } else {
       items.push({ ...item, id, ts: Date.now() });
     }
@@ -47,6 +48,19 @@ function addItem(tabId, item) {
     chrome.action.setBadgeBackgroundColor({ tabId, color: "#0b6a0b" });
   });
 }
+
+// Remember the Authorization header the page used, so downloads can replay it.
+const authByRequest = new Map();
+chrome.webRequest.onSendHeaders.addListener(
+  (d) => {
+    const auth = header(d.requestHeaders, "authorization");
+    if (!auth) return;
+    authByRequest.set(d.requestId, auth);
+    if (authByRequest.size > 500) authByRequest.delete(authByRequest.keys().next().value);
+  },
+  { urls: ["<all_urls>"] },
+  ["requestHeaders", "extraHeaders"]
+);
 
 chrome.webRequest.onResponseStarted.addListener(
   (d) => {
@@ -58,7 +72,7 @@ chrome.webRequest.onResponseStarted.addListener(
     if (!type) return;
     const size = totalSize(d.responseHeaders);
     if (type === "file" && size && size < MIN_FILE_BYTES) return;
-    addItem(d.tabId, { url: d.url, type, size });
+    addItem(d.tabId, { url: d.url, type, size, auth: authByRequest.get(d.requestId) || null });
   },
   { urls: ["<all_urls>"] },
   ["responseHeaders"]
