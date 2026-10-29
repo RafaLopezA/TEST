@@ -26,7 +26,8 @@ async function render() {
     const meta = document.createElement("div");
     meta.className = "meta";
     const label = { file: "MP4 directo", hls: "HLS (segmentos)", dash: "DASH (manifest)" }[item.type];
-    meta.textContent = `${label} · ${fmtSize(item.size)} · ${new URL(item.url).host}`;
+    const u = new URL(item.url);
+    meta.textContent = `${label} · ${fmtSize(item.size)} · ${u.host}${u.pathname.slice(-60)}`;
     const btn = document.createElement("button");
     btn.textContent = "Descargar";
     btn.onclick = () => download(item);
