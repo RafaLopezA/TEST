@@ -1,0 +1,10 @@
+{
+  "manifest_version": 3,
+  "name": "Viva Engage Video Downloader",
+  "version": "1.0.0",
+  "description": "Detecta y descarga los videos que reproduces en Viva Engage (Yammer).",
+  "permissions": ["webRequest", "downloads", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "Viva Engage Video Downloader", "default_popup": "popup.html" }
+}

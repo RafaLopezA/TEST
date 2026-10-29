@@ -1,0 +1,22 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px system-ui, sans-serif; width: 380px; margin: 0; padding: 12px; }
+  h1 { font-size: 14px; margin: 0 0 8px; }
+  .item { border: 1px solid #ccc; border-radius: 6px; padding: 8px; margin-bottom: 8px; }
+  .meta { color: #555; font-size: 12px; word-break: break-all; margin-bottom: 6px; }
+  button { cursor: pointer; padding: 4px 10px; }
+  #empty { color: #555; }
+  #foot { display: flex; justify-content: space-between; margin-top: 8px; }
+</style>
+</head>
+<body>
+  <h1>Videos detectados en esta pestaña</h1>
+  <div id="list"></div>
+  <p id="empty" hidden>Nada detectado todavía. Dale al play al video y vuelve a abrir este popup.</p>
+  <div id="foot"><button id="refresh">Actualizar</button><button id="clear">Limpiar</button></div>
+  <script src="popup.js"></script>
+</body>
+</html>
