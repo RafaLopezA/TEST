@@ -100,7 +100,11 @@ async function downloadPlaylist(url, name) {
   }
   await Promise.all(Array.from({ length: 6 }, worker));
   parts.push(...results);
-  const fmp4 = !!map || /\.(m4s|mp4|cmfv)(\?|$)/i.test(segs[0].url);
+  // Decide the container from the real bytes, not from the URL.
+  const head = new Uint8Array(parts[0].slice ? parts[0].slice(0, 12) : parts[0]);
+  const tag = String.fromCharCode(...head.slice(4, 8));
+  const fmp4 = head[0] !== 0x47 && ["ftyp", "styp", "moof", "moov"].includes(tag);
+  log(`Contenedor detectado: ${fmp4 ? "MP4 fragmentado" : head[0] === 0x47 ? "MPEG-TS" : "desconocido (primeros bytes: " + [...head].map((b) => b.toString(16)).join(" ") + ")"}`);
   save(parts, name.replace(/\.mp4$/i, fmp4 ? ".mp4" : ".ts"), fmp4 ? "video/mp4" : "video/mp2t");
 }
 
