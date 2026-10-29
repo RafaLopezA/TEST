@@ -10,10 +10,12 @@ function fileName(ext) {
   return `${base || "viva-engage-video"}.${ext}`;
 }
 
-function download(item) {
-  // HLS/DASH need segment downloading: done in a full tab so it survives the popup closing.
-  const q = new URLSearchParams({ u: item.url, t: item.type, n: fileName("mp4") });
-  chrome.tabs.create({ url: chrome.runtime.getURL("downloader.html?" + q) });
+async function download(item) {
+  // Run inside the page so the request carries the page's own cookies/origin.
+  const cfg = { u: item.url, t: item.type, n: fileName("mp4") };
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", func: (c) => { window.__VEDL = c; }, args: [cfg] });
+  await chrome.scripting.executeScript({ target: { tabId: tab.id }, world: "MAIN", files: ["downloader.js"] });
+  window.close();
 }
 
 async function render() {

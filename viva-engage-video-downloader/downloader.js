@@ -1,13 +1,24 @@
+(() => {
 const params = new URLSearchParams(location.search);
-const srcUrl = params.get("u");
-const kind = params.get("t");
-const outName = params.get("n") || "video.mp4";
+const cfg = window.__VEDL || {};
+const srcUrl = cfg.u || params.get("u");
+const kind = cfg.t || params.get("t");
+const outName = cfg.n || params.get("n") || "video.mp4";
+function ensureUi() {
+  if (document.getElementById("bar")) return;
+  const box = document.createElement("div");
+  box.style.cssText = "position:fixed;z-index:2147483647;right:16px;bottom:16px;width:360px;padding:12px;background:#fff;color:#111;border:1px solid #888;border-radius:8px;font:13px system-ui;box-shadow:0 2px 12px #0006";
+  box.innerHTML = '<b id="title">Descargando…</b><br><progress id="bar" value="0" max="1" style="width:100%"></progress><div id="status"></div><div id="log" style="white-space:pre-wrap;color:#555;font-size:11px"></div>';
+  document.body.append(box);
+}
+ensureUi();
 const $ = (id) => document.getElementById(id);
 const status = (s) => ($("status").textContent = s);
 const log = (s) => ($("log").textContent += s + "\n");
 
 let authHeader = null;
 async function loadAuth() {
+  if (typeof chrome === "undefined" || !chrome.storage?.session) return;
   const all = await chrome.storage.session.get(null);
   for (const items of Object.values(all)) {
     const hit = Array.isArray(items) && items.find((i) => i.url === srcUrl);
@@ -190,3 +201,5 @@ run().catch((e) => {
   $("title").textContent = "Error";
   status(e.message);
 });
+
+})();
