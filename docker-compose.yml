@@ -1,0 +1,15 @@
+services:
+  team-hub:
+    build: .
+    ports: ["3000:3000"]
+    environment:
+      ADMIN_EMAIL: admin@example.com      # usuario administrador inicial
+      ADMIN_PASSWORD: cambia-esta-clave   # cámbiala; si se omite se genera una y se muestra en el log
+      # SESSION_SECRET: valor-largo-aleatorio   # opcional: por defecto se genera y se guarda en la base de datos
+      # COOKIE_SECURE: "1"                      # actívalo cuando se sirva por HTTPS
+      # TRUST_PROXY: "1"                        # detrás de un proxy inverso
+      # SEED_DEMO: "1"                          # carga datos ficticios si la base de datos está vacía
+    volumes: ["teamhub-data:/data"]
+    restart: unless-stopped
+volumes:
+  teamhub-data:
