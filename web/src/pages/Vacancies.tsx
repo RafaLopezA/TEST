@@ -6,38 +6,38 @@ import { useApp } from '../ctx';
 import { FormModal } from '../forms';
 import { useOrg } from '../hooks';
 import { Confirm, Dot, Empty, Field, Kpi, Pill, avg, daysBetween, disp, fmtDate } from '../ui';
-import { VAC_COLOR } from './Dashboard';
+import { VAC_COLOR, vacanciesAt } from '../vac';
 
 const num = (v: string | boolean) => (v === '' || typeof v === 'boolean' ? null : Number(v));
 
 export function Vacancies() {
-  const { meta, chapter, grade, canEdit, toast } = useApp();
+  const { meta, chapter, grade, canEdit, toast, asOf } = useApp();
   const { active, name } = useOrg();
   const { data: list = [] } = useVacancies();
   const [tab, setTab] = useState<'open' | 'closed'>('open');
   const [edit, setEdit] = useState<Vacancy | 'new' | null>(null), [fill, setFill] = useState<Vacancy | null>(null), [del, setDel] = useState<Vacancy | null>(null);
   const patch = useSave(({ id, status }: { id: number; status: string }) => api('PATCH', `/vacancies/${id}`, { status }));
   const remove = useSave((id: number) => api('DELETE', `/vacancies/${id}`));
-  const open = list.filter(v => !v.closed_at), closed = list.filter(v => v.closed_at), filled = closed.filter(v => v.status === 'Filled');
+  const { open, closed } = vacanciesAt(list, asOf, meta.today), filled = closed.filter(v => v.status === 'Filled');
   const openStatuses = meta.vacancy_statuses.filter(s => s !== 'Filled' && s !== 'Cancelled');
   const people = active.slice().sort((a, b) => a.name.localeCompare(b.name));
 
-  const VacCard = ({ v }: { v: Vacancy }) => { const c = chapter(v.chapter_id), age = daysBetween(v.opened_at, meta.today);
+  const VacCard = ({ v }: { v: Vacancy }) => { const c = chapter(v.chapter_id), age = daysBetween(v.opened_at, asOf);
     return <div className="vcard"><div className="vtitle"><b>{v.code}</b><Pill>{grade(v.grade_id)?.code ?? '—'}</Pill></div>
       <small>{v.title}</small><small>{c ? <><Dot color={c.color} />{c.name}</> : 'Sin chapter'} · {disp(name(v.manager_id)) || 'sin manager'}</small>
       <small>{v.prf && `PRF ${v.prf}`}{v.prf && v.sap && ' · '}{v.sap && `SAP ${v.sap}`}</small>
       {v.comments && <small className="wrap">💬 {v.comments}</small>}
-      <small className={age > 90 ? 'down' : ''}>Abierta hace {age} días{v.target_start ? ` · objetivo ${fmtDate(v.target_start)}` : ''}</small>
+      <small className={age > 90 ? 'down' : ''}>{age} días abierta{v.target_start ? ` · objetivo ${fmtDate(v.target_start)}` : ''}</small>
       {canEdit && <div className="vactions">
         <select value={v.status} onChange={e => patch.mutate({ id: v.id, status: e.target.value }, { onError: err => toast(err.message, 'error') })}>{meta.vacancy_statuses.filter(s => s !== 'Filled').map(s => <option key={s}>{s}</option>)}</select>
         <button className="btn sm primary" onClick={() => setFill(v)}>Cubrir</button><button className="btn sm" onClick={() => setEdit(v)}>Editar</button></div>}
     </div>; };
 
   return <>
-    <div className="head"><div><h1>Vacantes</h1><p className="sub">Posiciones abiertas (TBH) y su proceso de contratación</p></div>
+    <div className="head"><div><h1>Vacantes</h1><p className="sub">Posiciones abiertas (TBH) y su proceso de contratación · situación a {fmtDate(asOf)}</p></div>
       {canEdit && <button className="btn primary" onClick={() => setEdit('new')}>+ Nueva vacante</button>}</div>
     <div className="grid kpis">
-      <Kpi value={open.length} label="Abiertas" /><Kpi value={`${Math.round(avg(open.map(v => daysBetween(v.opened_at, meta.today))))} d`} label="Antigüedad media de las abiertas" />
+      <Kpi value={open.length} label="Abiertas" /><Kpi value={`${Math.round(avg(open.map(v => daysBetween(v.opened_at, asOf))))} d`} label="Antigüedad media de las abiertas" />
       <Kpi value={filled.length} label="Cubiertas (histórico)" /><Kpi value={filled.length ? `${Math.round(avg(filled.map(v => daysBetween(v.opened_at, v.closed_at!))))} d` : '—'} label="Tiempo medio de cobertura" />
     </div>
     <div className="tabs"><button className={tab === 'open' ? 'on' : ''} onClick={() => setTab('open')}>Tablero ({open.length})</button><button className={tab === 'closed' ? 'on' : ''} onClick={() => setTab('closed')}>Cerradas ({closed.length})</button></div>

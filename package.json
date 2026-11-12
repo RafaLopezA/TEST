@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "workspaces": ["server", "web"],
   "scripts": {
-    "dev": "npm run dev -w server & npm run dev -w web",
+    "dev": "trap 'kill 0' INT TERM EXIT; npm run dev -w server & npm run dev -w web & wait",
     "build": "npm run build -w web",
     "start": "npm run start -w server",
     "seed": "npm run seed -w server",

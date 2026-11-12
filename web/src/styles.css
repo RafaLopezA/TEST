@@ -41,7 +41,8 @@ input,select,textarea{font:inherit;color:var(--text);background:var(--surface);b
 input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:-1px}
 table{width:100%;border-collapse:collapse}
 th,td{text-align:left;padding:11px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
-th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);cursor:pointer;user-select:none}
+th{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);user-select:none}
+th.sort{cursor:pointer}
 tbody tr:hover{background:var(--bg)}
 .tw{overflow-x:auto}
 .person{display:flex;align-items:center;gap:10px}

@@ -36,6 +36,13 @@ const MIGRATIONS: string[] = [
     entity TEXT NOT NULL, entity_id INTEGER, action TEXT NOT NULL, summary TEXT NOT NULL, detail TEXT);
   CREATE INDEX idx_audit_entity ON audit_log(entity, entity_id);
   `,
+  `
+  ALTER TABLE users ADD COLUMN token_version INTEGER NOT NULL DEFAULT 0;
+  -- Motivo de baja en la versión que se cierra: así el histórico sobrevive a una reincorporación.
+  ALTER TABLE member_versions ADD COLUMN exit_reason TEXT NOT NULL DEFAULT '';
+  UPDATE member_versions SET exit_reason = (SELECT m.exit_reason FROM members m WHERE m.id = member_versions.member_id)
+   WHERE valid_to IS NOT NULL AND valid_to = (SELECT m.exit_date FROM members m WHERE m.id = member_versions.member_id);
+  `,
 ];
 
 export function openDb(path: string): DB {
@@ -52,13 +59,17 @@ export function openDb(path: string): DB {
 export const all = <T>(db: DB, sql: string, ...p: P[]) => db.prepare(sql).all(...p) as T[];
 export const get = <T>(db: DB, sql: string, ...p: P[]) => db.prepare(sql).get(...p) as T | undefined;
 export const run = (db: DB, sql: string, ...p: P[]) => Number(db.prepare(sql).run(...p).lastInsertRowid);
+/** Ejecuta y devuelve el número de filas afectadas. */
+export const exec = (db: DB, sql: string, ...p: P[]) => Number(db.prepare(sql).run(...p).changes);
 
-let depth = 0;
-/** Transacción (reentrante: las anidadas se unen a la exterior). */
+const active = new WeakSet<DB>();
+/** Transacción (reentrante por conexión: las anidadas se unen a la exterior). */
 export function tx<T>(db: DB, fn: () => T): T {
-  if (depth > 0) return fn();
-  db.exec('BEGIN IMMEDIATE'); depth++;
-  try { const r = fn(); db.exec('COMMIT'); return r; } catch (e) { db.exec('ROLLBACK'); throw e; } finally { depth--; }
+  if (active.has(db)) return fn();
+  db.exec('BEGIN IMMEDIATE'); active.add(db);
+  try { const r = fn(); db.exec('COMMIT'); return r; }
+  catch (e) { try { db.exec('ROLLBACK'); } catch { /* SQLite ya la había deshecho */ } throw e; }
+  finally { active.delete(db); }
 }
 
 export function setting(db: DB, key: string, init: () => string): string {

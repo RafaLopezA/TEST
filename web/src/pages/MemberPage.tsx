@@ -10,7 +10,7 @@ import { Avatar, Card, Confirm, Dot, Empty, Pill, disp, fmtDate, yearsBetween } 
 export function MemberPage() {
   const id = Number(useParams().id);
   const { data, isLoading, error } = useMember(id);
-  const { chapter, grade, canEdit, isAdmin, meta, toast } = useApp();
+  const { chapter, grade, canEdit, isAdmin, meta, toast, asOf } = useApp();
   const { byId, reports, name } = useOrg();
   const nav = useNavigate();
   const [modal, setModal] = useState<'change' | 'personal' | 'exit' | 'rehire' | 'delete' | null>(null);
@@ -18,10 +18,15 @@ export function MemberPage() {
   if (isLoading) return <Empty>Cargando…</Empty>;
   if (error || !data) return <Empty>No se encontró la persona. <Link to="/members">Volver</Link></Empty>;
   const { member, versions, audit } = data;
-  const row = byId.get(id), cur = versions.at(-1)!, open = versions.find(v => v.valid_to === null);
+  // Situación a la fecha seleccionada: la versión vigente ese día; si no hay (baja o alta futura), la más cercana.
+  const live = versions.find(v => v.valid_from <= asOf && (v.valid_to === null || v.valid_to > asOf));
+  const cur = live ?? [...versions].reverse().find(v => v.valid_from <= asOf) ?? versions[0];
+  const row = byId.get(id), open = versions.find(v => v.valid_to === null), last = versions.at(-1)!;
+  const gone = !open && last.valid_to! <= meta.today, plannedExit = !open && !gone;
+  const gradeSince = versions.filter(v => v.valid_from <= cur.valid_from).reverse().find((v, i, a) => a[i + 1]?.grade_id !== v.grade_id)?.valid_from;
   const c = chapter(cur.chapter_id), mine = reports.get(id) ?? [];
   // Fila "actual" para los formularios aunque la fecha global sea otra
-  const asRow: Row = row ?? { ...cur, version_id: cur.id, ...member, member_id: id, team_id: null, state: open ? 'active' : 'exited' };
+  const asRow: Row = row ?? { ...cur, version_id: cur.id, ...member, member_id: id, team_id: null, state: live ? 'active' : 'exited' };
 
   const describe = (v: Version, prev?: Version): string[] => {
     if (!prev) return ['Alta en la organización'];
@@ -36,29 +41,32 @@ export function MemberPage() {
   };
   const events = versions.flatMap((v, i) => {
     const e = [{ date: v.valid_from, lines: describe(v, versions[i - 1]), reason: v.reason, kind: i === 0 ? 'hire' : 'change', v }];
-    if (v.valid_to && versions[i + 1]?.valid_from !== v.valid_to) e.push({ date: v.valid_to, lines: ['Baja'], reason: i === versions.length - 1 ? member.exit_reason : '', kind: 'exit', v });
+    if (v.valid_to && versions[i + 1]?.valid_from !== v.valid_to) e.push({ date: v.valid_to, lines: ['Baja'], reason: v.exit_reason, kind: 'exit', v });
     return e;
   }).reverse();
 
   return <>
-    <div className="head"><div className="person big"><Avatar name={member.name} color={open ? c?.color : '#aaa'} />
+    <div className="head"><div className="person big"><Avatar name={member.name} color={live ? c?.color : '#aaa'} />
       <div><h1>{disp(member.name)}</h1><p className="sub">{cur.title || 'Sin título'} · {member.email || 'sin email'}</p></div></div>
       {canEdit && <div className="row">
-        {open ? <><button className="btn primary" onClick={() => setModal('change')}>Cambio organizativo</button><button className="btn" onClick={() => setModal('personal')}>Datos personales</button>
-          <button className="btn danger" onClick={() => setModal('exit')}>Dar de baja</button></>
-          : <><button className="btn primary" onClick={() => setModal('rehire')}>Reincorporar</button><button className="btn" onClick={() => setModal('personal')}>Datos personales</button></>}
+        {!gone && <button className="btn primary" onClick={() => setModal('change')}>Cambio organizativo</button>}
+        {gone && <button className="btn primary" onClick={() => setModal('rehire')}>Reincorporar</button>}
+        <button className="btn" onClick={() => setModal('personal')}>Datos personales</button>
+        {open && <button className="btn danger" onClick={() => setModal('exit')}>Dar de baja</button>}
         {isAdmin && <button className="btn danger" title="Borrado definitivo (solo para errores de alta)" onClick={() => setModal('delete')}>Borrar</button>}
       </div>}</div>
     <div className="grid cols2">
-      <Card title="Situación actual">
+      <Card title={asOf === meta.today ? 'Situación actual' : `Situación a ${fmtDate(asOf)}`}>
         <dl className="facts">
-          <dt>Estado</dt><dd>{open ? (member.exit_date ? <Pill color="#f5a524">Baja prevista {fmtDate(member.exit_date)}</Pill> : <Pill color="#12a594">Activo</Pill>) : <Pill off>Baja desde {fmtDate(member.exit_date)}{member.exit_reason ? ` · ${member.exit_reason}` : ''}</Pill>}</dd>
+          <dt>Estado</dt><dd>{live ? <><Pill color="#12a594">Activo</Pill>{plannedExit && <Pill color="#f5a524">Baja prevista {fmtDate(last.valid_to)}</Pill>}</>
+            : cur.valid_from > asOf ? <Pill color="#0091ff">Se incorpora el {fmtDate(cur.valid_from)}</Pill>
+              : <Pill off>Baja desde {fmtDate(cur.valid_to)}{cur.exit_reason ? ` · ${cur.exit_reason}` : ''}</Pill>}</dd>
           <dt>Chapter</dt><dd>{c ? <><Dot color={c.color} />{c.name}</> : '—'}</dd>
           <dt>Grado</dt><dd>{grade(cur.grade_id) ? <><Pill>{grade(cur.grade_id)!.code}</Pill> {grade(cur.grade_id)!.description}</> : '—'}</dd>
           <dt>Manager</dt><dd>{cur.manager_id ? <Link to={`/members/${cur.manager_id}`}>{disp(name(cur.manager_id))}</Link> : '—'}</dd>
           <dt>Ubicación</dt><dd>{[cur.city, cur.country].filter(Boolean).join(', ') || '—'}</dd>
-          <dt>Alta</dt><dd>{fmtDate(member.hire_date)} · {yearsBetween(member.hire_date, member.exit_date ?? meta.today).toFixed(1)} años</dd>
-          <dt>En el grado desde</dt><dd>{fmtDate([...versions].reverse().find((v, i, a) => a[i + 1]?.grade_id !== v.grade_id)?.valid_from)}</dd>
+          <dt>Alta</dt><dd>{fmtDate(member.hire_date)}{member.hire_date <= asOf && <> · {yearsBetween(member.hire_date, live || !cur.valid_to ? asOf : cur.valid_to).toFixed(1)} años</>}</dd>
+          <dt>En el grado desde</dt><dd>{fmtDate(gradeSince)}</dd>
           <dt>Skills</dt><dd>{member.skills ? member.skills.split(',').map(s => s.trim()).filter(Boolean).map(s => <Pill key={s} off>{s}</Pill>) : '—'}</dd>
           {member.notes && <><dt>Notas</dt><dd>{member.notes}</dd></>}
         </dl>

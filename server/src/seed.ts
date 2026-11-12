@@ -37,7 +37,7 @@ export function seedDemo(db: DB) {
       const mgrs = [0, 1].map(i => mk('M3', chapter, dir, addDays(start, 60 + ti * 30 + i * 45)));
       allManagers.push(...mgrs);
       for (let i = 0; i < size; i++) {
-        const hire = between(addDays(start, 120), addDays(now, -40));
+        const hire = between(addDays(start, 240), addDays(now, -40));
         let gi = Math.floor(rnd() * 4), mgr = rnd() < 0.2 ? dir : pick(mgrs), chap: string = chapter;
         const id = mk(LADDER[gi], chapter, mgr, hire, rnd() < 0.15 ? 'Gurgaon' : 'Zaragoza', undefined);
         if (rnd() < 0.15) run(db, "UPDATE member_versions SET country='India' WHERE member_id=? AND city='Gurgaon'", id);

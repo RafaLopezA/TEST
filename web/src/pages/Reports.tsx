@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Legend, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useMovements, useRoster, useTimeline, useVacancies } from '../api';
 import type { MoveType, Row } from '../api';
 import { useApp } from '../ctx';
 import { useOrg } from '../hooks';
-import { Bars, Card, Empty, Kpi, Matrix, PALETTE, Pill, addYears, avg, countBy, daysBetween, disp, downloadCsv, fmtDate, fmtMonth, yearsBetween } from '../ui';
-import { VAC_COLOR } from './Dashboard';
+import { Bars, Card, Empty, Kpi, Matrix, PALETTE, Pill, addYears, avg, countBy, daysBetween, disp, downloadCsv, fmtDate, fmtMonth, yearsBefore, yearsBetween } from '../ui';
+import { VAC_COLOR, vacanciesAt } from '../vac';
 
 export const MOVE: Record<MoveType, { label: string; color: string }> = {
   hire: { label: 'Alta', color: '#12a594' }, rehire: { label: 'Reincorporación', color: '#12a594' }, exit: { label: 'Baja', color: '#e5484d' },
@@ -20,7 +20,9 @@ const tip = { contentStyle: { background: 'var(--surface)', border: '1px solid v
 export function Reports() {
   const { asOf, meta } = useApp();
   const [tab, setTab] = useState<Tab>('evolution');
-  const [from, setFrom] = useState(addYears(asOf, -2) < meta.first_date ? meta.first_date : addYears(asOf, -2)), [to, setTo] = useState(asOf);
+  const [from, setFrom] = useState(yearsBefore(asOf, 2, meta.first_date)), [to, setTo] = useState(asOf);
+  // El rango sigue a la fecha de la barra superior cuando esta cambia.
+  useEffect(() => { setFrom(yearsBefore(asOf, 2, meta.first_date)); setTo(asOf); }, [asOf, meta.first_date]);
   const range = <span className="range">Desde <input type="date" value={from} max={to} onChange={e => e.target.value && setFrom(e.target.value)} /> hasta <input type="date" value={to} min={from} onChange={e => e.target.value && setTo(e.target.value)} /></span>;
   return <>
     <div className="head"><div><h1>Reportes</h1><p className="sub">Históricos y análisis de la organización</p></div><button className="btn primary" onClick={() => window.print()}>🖨 Imprimir / PDF</button></div>
@@ -76,11 +78,12 @@ function Moves({ from, to, range }: { from: string; to: string; range: React.Rea
 
 function Compare() {
   const { asOf, meta, chapter, grade } = useApp();
-  const [a, setA] = useState(addYears(asOf, -1) < meta.first_date ? meta.first_date : addYears(asOf, -1)), [b, setB] = useState(asOf);
+  const [a, setA] = useState(yearsBefore(asOf, 1, meta.first_date)), [b, setB] = useState(asOf);
+  useEffect(() => { setA(yearsBefore(asOf, 1, meta.first_date)); setB(asOf); }, [asOf, meta.first_date]);
   const act = (rows?: Row[]) => (rows ?? []).filter(r => r.state === 'active');
   const A = act(useRoster(a).data), B = act(useRoster(b).data);
   const { data: moves = [] } = useMovements(a < b ? a : b, a < b ? b : a);
-  const inA = new Map(A.map(r => [r.member_id, r])), inB = new Map(B.map(r => [r.member_id, r]));
+  const inA = new Map(A.map(r => [r.member_id, r])), inB = new Map(B.map(r => [r.member_id, r])), both = [...A, ...B];
   const joined = B.filter(r => !inA.has(r.member_id)), left = A.filter(r => !inB.has(r.member_id));
   const changed = B.filter(r => { const p = inA.get(r.member_id); return p && (p.grade_id !== r.grade_id || p.chapter_id !== r.chapter_id); });
   const table = (title: string, axes: { id: number; label: string }[], key: (r: Row) => number | null) => <Card title={title}><div className="tw"><table className="compact"><thead><tr><th /><th>{fmtDate(a)}</th><th>{fmtDate(b)}</th><th>Δ</th></tr></thead><tbody>
@@ -92,8 +95,8 @@ function Compare() {
     <div className="grid kpis"><Kpi value={`${A.length} → ${B.length}`} label="Headcount" /><Kpi value={joined.length} label="Entran" /><Kpi value={left.length} label="Salen" />
       <Kpi value={moves.filter(m => m.type === 'promotion').length} label="Promociones" /><Kpi value={moves.filter(m => m.type === 'chapter').length} label="Cambios de chapter" /></div>
     <div className="grid cols2">
-      {table('Por chapter', meta.chapters.map(c => ({ id: c.id, label: c.name })), r => r.chapter_id)}
-      {table('Por grado', meta.grades.map(g => ({ id: g.id, label: `${g.code} · ${g.description}` })), r => r.grade_id)}
+      {table('Por chapter', [...meta.chapters.map(c => ({ id: c.id, label: c.name })), ...(both.some(r => !chapter(r.chapter_id)) ? [{ id: 0, label: 'Sin chapter' }] : [])], r => chapter(r.chapter_id)?.id ?? 0)}
+      {table('Por grado', [...meta.grades.map(g => ({ id: g.id, label: `${g.code} · ${g.description}` })), ...(both.some(r => !grade(r.grade_id)) ? [{ id: 0, label: 'Sin grado' }] : [])], r => grade(r.grade_id)?.id ?? 0)}
       <Card title={`Entran (${joined.length})`}>{people(joined)}</Card><Card title={`Salen (${left.length})`}>{people(left)}</Card>
       <Card title={`Cambian de grado o chapter (${changed.length})`} style={{ gridColumn: '1/-1' }}>{changed.length ? <div className="tw"><table><thead><tr><th>Persona</th><th>Antes</th><th>Después</th></tr></thead><tbody>
         {changed.map(r => { const p = inA.get(r.member_id)!; return <tr key={r.member_id}><td><Link to={`/members/${r.member_id}`}>{disp(r.name)}</Link></td>
@@ -103,21 +106,23 @@ function Compare() {
 }
 
 function Structure() {
-  const { meta, asOf, grade, seniorLevel } = useApp(); const { active, reports, name, byId } = useOrg();
+  const { meta, asOf, grade, chapter, seniorLevel } = useApp(); const { active, reports, name, byId } = useOrg();
   const teams = [...new Set(active.map(m => m.team_id).filter((t): t is number => t != null))].sort((x, y) => name(x).localeCompare(name(y)));
-  const chAxes = meta.chapters.map(c => ({ id: c.id, label: c.name, color: c.color })), grAxes = meta.grades.map(g => ({ id: g.id, label: g.code }));
+  const ch = (m: Row) => chapter(m.chapter_id)?.id ?? 0, gr = (m: Row) => grade(m.grade_id)?.id ?? 0;   // 0 = sin asignar
+  const chAxes = [...meta.chapters.map(c => ({ id: c.id, label: c.name, color: c.color })), ...(active.some(m => !ch(m)) ? [{ id: 0, label: 'Sin chapter', color: '#9aa0b4' }] : [])];
+  const grAxes = [...meta.grades.map(g => ({ id: g.id, label: g.code })), ...(active.some(m => !gr(m)) ? [{ id: 0, label: 'Sin grado' }] : [])];
   const locs = [...countBy(active, m => [m.city, m.country].filter(Boolean).join(', ') || 'Sin ubicar')].sort((x, y) => y[1] - x[1]);
   const skills = [...countBy(active.flatMap(m => m.skills.split(',').map(s => s.trim()).filter(Boolean)), s => s)].sort((x, y) => y[1] - x[1]).slice(0, 12);
   const buckets = [['< 1 año', 0, 1], ['1–2 años', 1, 2], ['2–5 años', 2, 5], ['> 5 años', 5, 99]] as const;
   const span = [...reports.entries()].map(([id, rs]) => ({ id, n: rs.length })).sort((x, y) => y.n - x.n);
-  const exportMatrix = () => downloadCsv(`chapter-grado-${asOf}.csv`, [['Chapter', ...meta.grades.map(g => g.code), 'Total'],
-    ...meta.chapters.map(c => { const r = meta.grades.map(g => active.filter(m => m.chapter_id === c.id && m.grade_id === g.id).length); return [c.name, ...r, r.reduce((x, y) => x + y, 0)]; })]);
+  const exportMatrix = () => downloadCsv(`chapter-grado-${asOf}.csv`, [['Chapter', ...grAxes.map(g => g.label), 'Total'],
+    ...chAxes.map(c => { const r = grAxes.map(g => active.filter(m => ch(m) === c.id && gr(m) === g.id).length); return [c.label, ...r, r.reduce((x, y) => x + y, 0)]; })]);
   return <>
     <p className="sub">Estructura a {fmtDate(asOf)} · cambia la fecha en la barra superior para ver otra foto.</p>
-    <Card title="Chapter × grado" actions={<button className="btn sm" onClick={exportMatrix}>⬇ CSV</button>}><Matrix rows={chAxes} cols={grAxes} cell={(r, c) => active.filter(m => m.chapter_id === r.id && m.grade_id === c.id).length} /></Card>
-    <Card title="Equipo × chapter" style={{ margin: '16px 0' }}><Matrix rows={teams.map(t => ({ id: t, label: disp(name(t)) }))} cols={chAxes} cell={(r, c) => active.filter(m => m.team_id === r.id && m.chapter_id === c.id).length} /></Card>
+    <Card title="Chapter × grado" actions={<button className="btn sm" onClick={exportMatrix}>⬇ CSV</button>}><Matrix rows={chAxes} cols={grAxes} cell={(r, c) => active.filter(m => ch(m) === r.id && gr(m) === c.id).length} /></Card>
+    <Card title="Equipo × chapter" style={{ margin: '16px 0' }}><Matrix rows={teams.map(t => ({ id: t, label: disp(name(t)) }))} cols={chAxes} cell={(r, c) => active.filter(m => m.team_id === r.id && ch(m) === c.id).length} /></Card>
     <div className="grid cols2">
-      <Card title="Pirámide de grados"><Bars items={meta.grades.map(g => ({ label: `${g.code} · ${g.description}`, value: active.filter(m => m.grade_id === g.id).length }))} /></Card>
+      <Card title="Pirámide de grados"><Bars items={[...meta.grades.map(g => ({ label: `${g.code} · ${g.description}`, value: active.filter(m => m.grade_id === g.id).length })), ...(active.some(m => !gr(m)) ? [{ label: 'Sin grado', value: active.filter(m => !gr(m)).length, color: '#9aa0b4' }] : [])]} /></Card>
       {seniorLevel != null && <Card title="% M3 o superior por chapter"><Bars items={meta.chapters.map(c => { const ms = active.filter(m => m.chapter_id === c.id); return { label: c.name, color: c.color, suffix: '%', value: ms.length ? Math.round((ms.filter(m => (grade(m.grade_id)?.level ?? 0) >= seniorLevel).length / ms.length) * 100) : 0 }; })} /></Card>}
       <Card title="Antigüedad"><Bars items={buckets.map(([label, lo, hi]) => ({ label, value: active.filter(m => { const y = yearsBetween(m.hire_date, asOf); return y >= lo && y < hi; }).length }))} /></Card>
       <Card title="Ubicaciones"><Bars items={locs.map(([label, value]) => ({ label, value }))} /></Card>
@@ -152,20 +157,21 @@ function Attrition() {
 }
 
 function VacReport() {
-  const { meta, chapter } = useApp();
+  const { meta, chapter, asOf } = useApp();
   const { data: list = [] } = useVacancies();
-  const open = list.filter(v => !v.closed_at), filled = list.filter(v => v.status === 'Filled' && v.closed_at);
+  const { open, closed } = vacanciesAt(list, asOf, meta.today), filled = closed.filter(v => v.status === 'Filled');
   const chAxes = meta.chapters.map(c => ({ id: c.id, label: c.name, color: c.color })), openStatuses = meta.vacancy_statuses.filter(s => s !== 'Filled' && s !== 'Cancelled');
   const aging = [['< 30 días', 0, 30], ['30–60', 30, 60], ['60–90', 60, 90], ['> 90 días', 90, 1e6]] as const;
   return <>
+    <p className="sub">Situación de las vacantes a {fmtDate(asOf)}.</p>
     <div className="grid kpis"><Kpi value={open.length} label="Abiertas" /><Kpi value={filled.length} label="Cubiertas" /><Kpi value={filled.length ? `${Math.round(avg(filled.map(v => daysBetween(v.opened_at, v.closed_at!))))} d` : '—'} label="Tiempo medio de cobertura" />
-      <Kpi value={list.filter(v => v.status === 'Cancelled').length} label="Canceladas" /></div>
+      <Kpi value={closed.filter(v => v.status === 'Cancelled').length} label="Canceladas" /></div>
     <Card title="Abiertas por chapter y estado"><Matrix rows={chAxes} cols={openStatuses.map(s => ({ id: s, label: s }))} cell={(r, c) => open.filter(v => v.chapter_id === r.id && v.status === c.id).length} /></Card>
     <div className="grid cols2" style={{ marginTop: 16 }}>
       <Card title="Embudo actual"><Bars items={openStatuses.map(s => ({ label: s, value: open.filter(v => v.status === s).length, color: VAC_COLOR[s] }))} /></Card>
-      <Card title="Antigüedad de las abiertas"><Bars items={aging.map(([label, lo, hi]) => ({ label, value: open.filter(v => { const d = daysBetween(v.opened_at, meta.today); return d >= lo && d < hi; }).length }))} /></Card>
+      <Card title="Antigüedad de las abiertas"><Bars items={aging.map(([label, lo, hi]) => ({ label, value: open.filter(v => { const d = daysBetween(v.opened_at, asOf); return d >= lo && d < hi; }).length }))} /></Card>
       <Card title="Días medios de cobertura por chapter"><Bars items={meta.chapters.map(c => ({ label: c.name, color: c.color, suffix: ' d', value: Math.round(avg(filled.filter(v => v.chapter_id === c.id).map(v => daysBetween(v.opened_at, v.closed_at!)))) })).filter(x => x.value)} /></Card>
-      <Card title="Abiertas más antiguas">{open.length ? <ul className="feed">{open.slice().sort((a, b) => a.opened_at.localeCompare(b.opened_at)).slice(0, 8).map(v => <li key={v.id}><Pill color={VAC_COLOR[v.status]}>{v.status}</Pill><span>{v.code}<small> {chapter(v.chapter_id)?.name}</small></span><time>{daysBetween(v.opened_at, meta.today)} d</time></li>)}</ul> : <Empty>Sin vacantes abiertas</Empty>}</Card>
+      <Card title="Abiertas más antiguas">{open.length ? <ul className="feed">{open.slice().sort((a, b) => a.opened_at.localeCompare(b.opened_at)).slice(0, 8).map(v => <li key={v.id}><Pill color={VAC_COLOR[v.status]}>{v.status}</Pill><span>{v.code}<small> {chapter(v.chapter_id)?.name}</small></span><time>{daysBetween(v.opened_at, asOf)} d</time></li>)}</ul> : <Empty>Sin vacantes abiertas</Empty>}</Card>
     </div>
   </>;
 }

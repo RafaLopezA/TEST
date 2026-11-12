@@ -5,7 +5,7 @@ import type { Row, Vacancy } from '../api';
 import { useApp } from '../ctx';
 import { useOrg } from '../hooks';
 import { Avatar, Empty, Pill, disp, fmtDate } from '../ui';
-import { VAC_COLOR } from './Dashboard';
+import { VAC_COLOR, vacanciesAt } from '../vac';
 
 type Node = { kind: 'm'; row: Row } | { kind: 'v'; vac: Vacancy };
 
@@ -14,7 +14,7 @@ export function Org() {
   const { active, reports } = useOrg();
   const { data: vacancies = [] } = useVacancies();
   const [mode, setMode] = useState<'chart' | 'tree'>('chart');
-  const openVac = vacancies.filter(v => v.opened_at <= asOf && (!v.closed_at || v.closed_at > asOf));
+  const openVac = vacanciesAt(vacancies, asOf, meta.today).open;
   const ids = new Set(active.map(r => r.member_id));
   const lvl = (r: Row) => grade(r.grade_id)?.level ?? 0;
   const kids = (id: number): Node[] => [

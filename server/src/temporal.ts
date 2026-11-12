@@ -6,11 +6,13 @@ export interface VRow {
   version_id: number; member_id: number; valid_from: string; valid_to: string | null;
   title: string; chapter_id: number | null; grade_id: number | null; manager_id: number | null; country: string; city: string; reason: string;
   name: string; email: string; skills: string; notes: string; hire_date: string; exit_date: string | null; exit_reason: string;
+  /** Motivo de baja registrado en esta versión (si la persona salió al cerrarse). */
+  end_reason: string;
 }
 export interface SnapRow extends VRow { team_id: number | null; state: 'active' | 'exited' | 'future' }
 
 export const loadVersions = (db: DB) => all<VRow>(db, `
-  SELECT v.id AS version_id, v.member_id, v.valid_from, v.valid_to, v.title, v.chapter_id, v.grade_id, v.manager_id, v.country, v.city, v.reason,
+  SELECT v.id AS version_id, v.member_id, v.valid_from, v.valid_to, v.title, v.chapter_id, v.grade_id, v.manager_id, v.country, v.city, v.reason, v.exit_reason AS end_reason,
          m.name, m.email, m.skills, m.notes, m.hire_date, m.exit_date, m.exit_reason
   FROM member_versions v JOIN members m ON m.id = v.member_id ORDER BY v.member_id, v.valid_from, v.id`);
 
@@ -44,7 +46,7 @@ export function roster(db: DB, asOf: string): SnapRow[] {
   for (const v of versions) {
     if (present.has(v.member_id)) continue;
     const past = v.valid_from <= asOf, prev = extra.get(v.member_id);
-    if (past) extra.set(v.member_id, { ...v, team_id: null, state: 'exited' });           // la última pasada gana
+    if (past) extra.set(v.member_id, { ...v, exit_date: v.valid_to, exit_reason: v.end_reason, team_id: null, state: 'exited' });   // la última pasada gana: su fin es la baja vigente a esa fecha
     else if (!prev) extra.set(v.member_id, { ...v, team_id: null, state: 'future' });     // primera futura si no hay pasada
   }
   return [...snap, ...extra.values()];
@@ -80,7 +82,7 @@ export function movements(db: DB, from: string, to: string): Movement[] {
       if (prev.title !== v.title) push(v.valid_from, 'title', v, prev.title || '—', v.title || '—');
       if (prev.city !== v.city || prev.country !== v.country) push(v.valid_from, 'location', v, [prev.city, prev.country].filter(Boolean).join(', ') || '—', [v.city, v.country].filter(Boolean).join(', ') || '—');
     }
-    if (v.valid_to !== null && (!next || next.valid_from !== v.valid_to)) push(v.valid_to, 'exit', v, where, '', v.exit_reason);
+    if (v.valid_to !== null && (!next || next.valid_from !== v.valid_to)) push(v.valid_to, 'exit', v, where, '', v.end_reason);
   }
   return out.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : a.name.localeCompare(b.name)));
 }

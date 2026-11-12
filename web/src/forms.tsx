@@ -60,7 +60,7 @@ export function MemberCreate({ onClose, onCreated }: { onClose: () => void; onCr
 /** Cambio organizativo: genera una nueva versión en el histórico con fecha efectiva (o corrige la actual). */
 export function MemberChange({ row, onClose }: { row: Row; onClose: () => void }) {
   const { meta } = useApp();
-  return <FormModal title={`Cambio organizativo · ${disp(row.name)}`} wide onClose={onClose} done="Cambio registrado" initial={{ ...orgInit(row), effective_date: meta.today, reason: '', correction: false }}
+  return <FormModal title={`Cambio organizativo · ${disp(row.name)}`} wide onClose={onClose} done="Cambio registrado" initial={{ ...orgInit(row), effective_date: row.valid_from > meta.today ? row.valid_from : meta.today, reason: '', correction: false }}
     submit={v => api('PATCH', `/members/${row.member_id}`, { ...orgBody(v), ...(v.correction ? { correction: true } : { effective_date: v.effective_date, reason: v.reason }) })}>
     {(v, set, setV) => <>
       <OrgFields v={v} set={set} selfId={row.member_id} />

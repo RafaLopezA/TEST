@@ -13,6 +13,7 @@ Aplicación web multiusuario para gestionar un equipo organizado por **chapters*
 - **Reportes**: evolución del headcount (por chapter, grado o equipo), movimientos (altas, bajas, promociones, traslados), comparación entre dos fechas, estructura (matrices, pirámide, span of control, antigüedad, skills), rotación y vacantes. Exportación CSV e impresión/PDF.
 - **Importación Excel/CSV** con previsualización: detecta altas, cambios y ausencias, y los aplica con una fecha efectiva (sirve como carga inicial y como sincronización periódica).
 - **Auditoría**: quién cambió qué y cuándo.
+- **Seguridad**: contraseñas con scrypt, cookie de sesión `HttpOnly`/`SameSite=Strict`, límite de intentos de login y cierre de las sesiones abiertas al cambiar contraseña, rol o estado de un usuario.
 
 ## Puesta en marcha
 

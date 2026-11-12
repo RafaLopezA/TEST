@@ -5,7 +5,7 @@ import { get, setting } from './db.ts';
 import { HttpError } from './util.ts';
 import type { Actor } from './util.ts';
 
-export interface User { id: number; email: string; name: string; role: Actor['role']; active: number; password_hash: string }
+export interface User { id: number; email: string; name: string; role: Actor['role']; active: number; password_hash: string; token_version: number }
 const COOKIE = 'th_session';
 const TTL = 7 * 24 * 3600;
 
@@ -23,8 +23,9 @@ export function verifyPassword(pw: string, stored: string): boolean {
 const secret = (db: DB) => process.env.SESSION_SECRET || setting(db, 'session_secret', () => randomBytes(32).toString('hex'));
 const sign = (db: DB, body: string) => createHmac('sha256', secret(db)).update(body).digest('base64url');
 
-export function setSession(db: DB, res: Response, userId: number) {
-  const body = Buffer.from(JSON.stringify({ uid: userId, exp: Math.floor(Date.now() / 1000) + TTL })).toString('base64url');
+/** La sesión lleva la versión de token del usuario: al cambiar contraseña o rol se incrementa y las cookies anteriores dejan de valer. */
+export function setSession(db: DB, res: Response, user: Pick<User, 'id' | 'token_version'>) {
+  const body = Buffer.from(JSON.stringify({ uid: user.id, v: user.token_version, exp: Math.floor(Date.now() / 1000) + TTL })).toString('base64url');
   const secure = process.env.COOKIE_SECURE === '1' ? '; Secure' : '';
   res.setHeader('Set-Cookie', `${COOKIE}=${body}.${sign(db, body)}; HttpOnly; Path=/; SameSite=Strict; Max-Age=${TTL}${secure}`);
 }
@@ -38,10 +39,10 @@ function readSession(db: DB, req: Request): User | null {
   const expected = Buffer.from(sign(db, body)), given = Buffer.from(mac);
   if (expected.length !== given.length || !timingSafeEqual(expected, given)) return null;
   try {
-    const { uid, exp } = JSON.parse(Buffer.from(body, 'base64url').toString());
+    const { uid, exp, v } = JSON.parse(Buffer.from(body, 'base64url').toString());
     if (typeof exp !== 'number' || exp < Date.now() / 1000) return null;
     const u = get<User>(db, 'SELECT * FROM users WHERE id=? AND active=1', uid);
-    return u ?? null;
+    return u && u.token_version === v ? u : null;
   } catch { return null; }
 }
 
@@ -59,15 +60,29 @@ export const requireRole = (role: Actor['role']) => (req: Request, _res: Respons
   next();
 };
 
-/** Límite simple de intentos de login por IP+email. */
+/**
+ * Límite de intentos fallidos de login: por IP+email (fuerza bruta sobre una cuenta) y por IP
+ * (prueba de credenciales sobre muchas cuentas). Las entradas caducadas se purgan periódicamente.
+ */
+const WINDOW = 10 * 60000, MAX_PER_ACCOUNT = 8, MAX_PER_IP = 40, MAX_ENTRIES = 10000;
 const attempts = new Map<string, { n: number; until: number }>();
-export function loginThrottle(key: string, ok: boolean) {
-  const now = Date.now(), a = attempts.get(key);
-  if (ok) { attempts.delete(key); return; }
-  if (a && a.until > now && a.n >= 8) throw new HttpError(429, 'Demasiados intentos. Espera unos minutos.');
-  attempts.set(key, { n: a && a.until > now ? a.n + 1 : 1, until: now + 10 * 60000 });
+let lastPurge = 0;
+function purge(now: number) {
+  if (now - lastPurge < 60000 && attempts.size < MAX_ENTRIES) return;
+  lastPurge = now;
+  for (const [k, a] of attempts) if (a.until <= now) attempts.delete(k);
+  if (attempts.size >= MAX_ENTRIES) attempts.clear();   // último recurso ante una avalancha: nunca crecer sin límite
 }
-export function loginBlocked(key: string) {
-  const a = attempts.get(key);
-  if (a && a.until > Date.now() && a.n >= 8) throw new HttpError(429, 'Demasiados intentos. Espera unos minutos.');
+const count = (k: string, now: number) => { const a = attempts.get(k); return a && a.until > now ? a.n : 0; };
+const bump = (k: string, now: number) => attempts.set(k, { n: count(k, now) + 1, until: now + WINDOW });
+
+export function loginBlocked(ip: string, email: string) {
+  const now = Date.now(); purge(now);
+  if (count(`a|${ip}|${email}`, now) >= MAX_PER_ACCOUNT || count(`i|${ip}`, now) >= MAX_PER_IP) throw new HttpError(429, 'Demasiados intentos. Espera unos minutos.');
 }
+export function loginResult(ip: string, email: string, ok: boolean) {
+  const now = Date.now();
+  if (ok) { attempts.delete(`a|${ip}|${email}`); return; }
+  bump(`a|${ip}|${email}`, now); bump(`i|${ip}`, now);
+}
+export const resetLoginThrottle = () => attempts.clear();

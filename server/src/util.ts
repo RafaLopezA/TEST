@@ -6,7 +6,18 @@ export class HttpError extends Error {
   constructor(status: number, message: string) { super(message); this.status = status; }
 }
 export const today = () => new Date().toISOString().slice(0, 10);
-export const isDate = (s: unknown): s is string => typeof s === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(s) && !Number.isNaN(Date.parse(s));
+/** Fecha de calendario real en formato AAAA-MM-DD (rechaza 2026-02-31 o 2026-99-99). */
+export function isDate(s: unknown): s is string {
+  if (typeof s !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(s + 'T00:00:00Z');
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+/** Suma años; el 29 de febrero se ajusta al 28 cuando el año destino no es bisiesto. */
+export function addYears(d: string, n: number): string {
+  const r = `${String(Number(d.slice(0, 4)) + n).padStart(4, '0')}${d.slice(4)}`;
+  const valid: boolean = isDate(r);
+  return valid ? r : `${r.slice(0, 8)}28`;
+}
 export const dateOr = (s: unknown, fallback: string) => (isDate(s) ? s : fallback);
 export const addDays = (d: string, n: number) => new Date(Date.parse(d) + n * 86400000).toISOString().slice(0, 10);
 export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);

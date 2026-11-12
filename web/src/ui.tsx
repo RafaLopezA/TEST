@@ -9,14 +9,22 @@ export const fmtDate = (d?: string | null) => (d ? new Date(d + (d.length === 10
 export const fmtMonth = (d: string) => new Date(d + 'T00:00:00').toLocaleDateString('es-ES', { month: 'short', year: '2-digit' });
 export const daysBetween = (a: string, b: string) => Math.round((Date.parse(b) - Date.parse(a)) / 86400000);
 export const yearsBetween = (a: string, b: string) => daysBetween(a, b) / 365.25;
-export const addYears = (d: string, n: number) => `${Number(d.slice(0, 4)) + n}${d.slice(4)}`;
+/** Suma años; el 29 de febrero pasa al 28 si el año destino no es bisiesto. */
+export const addYears = (d: string, n: number) => {
+  const r = `${String(Number(d.slice(0, 4)) + n).padStart(4, '0')}${d.slice(4)}`, t = new Date(r + 'T00:00:00Z');
+  return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === r ? r : `${r.slice(0, 8)}28`;
+};
+/** Fecha `years` años antes de `d`, sin bajar de `min`. */
+export const yearsBefore = (d: string, years: number, min: string) => { const r = addYears(d, -years); return r < min ? min : r; };
 export const avg = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
 export const countBy = <T,>(list: T[], key: (x: T) => string | number | null | undefined) => {
   const m = new Map<string, number>(); for (const x of list) { const k = String(key(x) ?? ''); m.set(k, (m.get(k) || 0) + 1); } return m;
 };
 
 export function downloadCsv(name: string, rows: (string | number | null | undefined)[][]) {
-  const text = '﻿' + rows.map(r => r.map(v => `"${String(v ?? '').replace(/"/g, '""')}"`).join(';')).join('\n');
+  // Los textos que empiezan por = + - @ se anteponen con ' para que Excel no los interprete como fórmulas.
+  const cell = (v: string | number | null | undefined) => { const s = String(v ?? ''); return typeof v === 'string' && /^[=+\-@\t\r]/.test(s) ? `'${s}` : s; };
+  const text = '\ufeff' + rows.map(r => r.map(v => `"${cell(v).replace(/"/g, '""')}"`).join(';')).join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([text], { type: 'text/csv' })); a.download = name; a.click();
   setTimeout(() => URL.revokeObjectURL(a.href), 500);
 }

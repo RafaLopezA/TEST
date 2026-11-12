@@ -24,6 +24,9 @@ export function createApp(db: DB, staticDir?: string) {
     if (err instanceof HttpError) { res.status(err.status).json({ error: err.message }); return; }
     if (err instanceof ZodError) { res.status(400).json({ error: err.issues.map(i => `${i.path.join('.') || 'datos'}: ${i.message}`).join('; ') }); return; }
     if (err && typeof err === 'object' && 'type' in err && (err as { type: string }).type === 'entity.parse.failed') { res.status(400).json({ error: 'JSON no válido' }); return; }
+    const msg = err instanceof Error ? err.message : '';
+    if (/FOREIGN KEY constraint failed/.test(msg)) { res.status(409).json({ error: 'La operación hace referencia a un elemento que no existe o que está en uso' }); return; }
+    if (/UNIQUE constraint failed/.test(msg)) { res.status(409).json({ error: 'Ya existe un elemento con esos datos' }); return; }
     console.error(err);
     res.status(500).json({ error: 'Error interno del servidor' });
   });

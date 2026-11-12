@@ -26,7 +26,7 @@ export function Members() {
       .sort((a, b) => { const x = key[sort.by](a), y = key[sort.by](b); return (x > y ? 1 : x < y ? -1 : 0) * sort.dir; });
   }, [rows, f, sort, chapter, grade, name]);
 
-  const th = (k: SortKey, label: string) => <th onClick={() => setSort(s => ({ by: k, dir: s.by === k ? (-s.dir as 1 | -1) : 1 }))}>{label}{sort.by === k ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''}</th>;
+  const th = (k: SortKey, label: string) => <th className="sort" onClick={() => setSort(s => ({ by: k, dir: s.by === k ? (-s.dir as 1 | -1) : 1 }))}>{label}{sort.by === k ? (sort.dir > 0 ? ' ↑' : ' ↓') : ''}</th>;
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF(s => ({ ...s, [k]: e.target.value }));
   const exportCsv = () => downloadCsv(`miembros-${asOf}.csv`, [['Nombre', 'Email', 'Título', 'Chapter', 'Grado', 'Manager', 'Equipo', 'País', 'Ciudad', 'Alta', 'Baja', 'Estado', 'Skills'],
     ...list.map(r => [r.name, r.email, r.title, chapter(r.chapter_id)?.name, grade(r.grade_id)?.code, name(r.manager_id), name(r.team_id), r.country, r.city, r.hire_date, r.exit_date, r.state, r.skills])]);

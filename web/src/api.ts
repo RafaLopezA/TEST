@@ -10,7 +10,7 @@ export interface Row {
   manager_id: number | null; country: string; city: string; reason: string; name: string; email: string; skills: string; notes: string;
   hire_date: string; exit_date: string | null; exit_reason: string; team_id: number | null; state: 'active' | 'exited' | 'future';
 }
-export interface Version { id: number; member_id: number; valid_from: string; valid_to: string | null; title: string; chapter_id: number | null; grade_id: number | null; manager_id: number | null; country: string; city: string; reason: string }
+export interface Version { id: number; member_id: number; valid_from: string; valid_to: string | null; title: string; chapter_id: number | null; grade_id: number | null; manager_id: number | null; country: string; city: string; reason: string; exit_reason: string }
 export interface AuditItem { id: number; at: string; user_name: string; entity: string; entity_id: number | null; action: string; summary: string; detail: string | null }
 export interface MemberDetail { member: { id: number; name: string; email: string; skills: string; notes: string; hire_date: string; exit_date: string | null; exit_reason: string }; versions: Version[]; audit: AuditItem[] }
 export interface Vacancy {
@@ -23,7 +23,8 @@ export interface TimelinePoint { date: string; total: number; groups: Record<str
 export interface ImportPlan {
   effective_date: string; newChapters: string[]; newGrades: string[]; placeholders: string[];
   create: { name: string; chapter: string; grade: string; manager: string }[]; update: { id: number; name: string; changes: { field: string; from: string; to: string }[] }[];
-  rehire: { id: number; name: string }[]; unchanged: number; missing: { id: number; name: string }[]; vacancies: { create: string[]; update: string[]; unchanged: number };
+  rehire: { id: number; name: string }[]; unchanged: number; missing: { id: number; name: string; can_exit: boolean }[]; skipped: { name: string; reason: string }[];
+  vacancies: { create: string[]; update: string[]; unchanged: number }; exited: number;
 }
 
 export class ApiError extends Error { status: number; constructor(status: number, message: string) { super(message); this.status = status; } }

@@ -2,15 +2,15 @@ import { Router } from 'express';
 import type { Request } from 'express';
 import { z } from 'zod';
 import type { DB } from './db.ts';
-import { all, get, run, setSetting, setting, tx } from './db.ts';
-import { authenticate, clearSession, hashPassword, loginBlocked, loginThrottle, requireRole, setSession, verifyPassword } from './auth.ts';
+import { all, exec, get, run, setSetting, setting, tx } from './db.ts';
+import { authenticate, clearSession, hashPassword, loginBlocked, loginResult, requireRole, setSession, verifyPassword } from './auth.ts';
 import type { User } from './auth.ts';
-import { applyImport, planImport, VACANCY_STATUSES } from './importer.ts';
-import { createMember, deleteMember, exitMember, getMember, rehireMember, updateMember, versionsOf } from './members.ts';
+import { applyImport, isClosing, planImport, VACANCY_STATUSES } from './importer.ts';
+import { createMember, deleteMember, exitMember, getMember, rehireMember, updateMember, versionAt, versionsOf } from './members.ts';
 import { movements, roster, snapshot, timeline } from './temporal.ts';
-import { HttpError, audit, dateOr, today } from './util.ts';
+import { HttpError, addYears, audit, dateOr, isDate, today } from './util.ts';
 
-const date = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Fecha no válida (AAAA-MM-DD)');
+const date = z.string().refine(isDate, 'Fecha no válida (AAAA-MM-DD)');
 const idn = z.number().int().positive().nullable();
 const str = (max = 300) => z.string().trim().max(max);
 const memberBody = z.object({
@@ -24,6 +24,7 @@ const vacancyBody = z.object({
 }).partial();
 const password = z.string().min(8, 'La contraseña debe tener al menos 8 caracteres').max(200);
 const role = z.enum(['admin', 'editor', 'viewer']);
+const found = (changes: number, what: string) => { if (!changes) throw new HttpError(404, `${what} no encontrado`); };
 const pid = (req: Request) => { const n = Number(req.params.id); if (!Number.isInteger(n) || n <= 0) throw new HttpError(400, 'Identificador no válido'); return n; };
 const publicUser = (u: User) => ({ id: u.id, email: u.email, name: u.name, role: u.role, active: !!u.active });
 
@@ -34,13 +35,13 @@ export function apiRouter(db: DB): Router {
   /* ---------- sesión ---------- */
   r.post('/auth/login', (req, res) => {
     const { email, password: pw } = z.object({ email: z.string().email(), password: z.string() }).parse(req.body);
-    const k = `${req.ip}|${email.toLowerCase()}`;
-    loginBlocked(k);
+    const ip = req.ip ?? '', who = email.toLowerCase();
+    loginBlocked(ip, who);
     const u = get<User>(db, 'SELECT * FROM users WHERE email=? AND active=1', email);
     const ok = !!u && verifyPassword(pw, u.password_hash);
-    loginThrottle(k, ok);
+    loginResult(ip, who, ok);
     if (!ok) throw new HttpError(401, 'Email o contraseña incorrectos');
-    setSession(db, res, u!.id);
+    setSession(db, res, u!);
     res.json(publicUser(u!));
   });
   r.post('/auth/logout', (_req, res) => { clearSession(res); res.json({ ok: true }); });
@@ -50,7 +51,9 @@ export function apiRouter(db: DB): Router {
   r.post('/auth/password', (req, res) => {
     const b = z.object({ current: z.string(), next: password }).parse(req.body);
     if (!verifyPassword(b.current, req.user!.password_hash)) throw new HttpError(400, 'La contraseña actual no es correcta');
-    run(db, 'UPDATE users SET password_hash=? WHERE id=?', hashPassword(b.next), req.user!.id);
+    // Invalida el resto de sesiones del usuario y renueva la actual.
+    run(db, 'UPDATE users SET password_hash=?, token_version=token_version+1 WHERE id=?', hashPassword(b.next), req.user!.id);
+    setSession(db, res, { id: req.user!.id, token_version: req.user!.token_version + 1 });
     audit(db, req.actor, 'user', req.user!.id, 'password', `${req.user!.name} cambió su contraseña`);
     res.json({ ok: true });
   });
@@ -78,13 +81,13 @@ export function apiRouter(db: DB): Router {
   r.put('/chapters/:id', editor, (req, res) => {
     const b = chapterBody.parse(req.body), id = pid(req);
     if (get(db, 'SELECT 1 FROM chapters WHERE name=? AND id<>?', b.name, id)) throw new HttpError(409, 'Ya existe un chapter con ese nombre');
-    run(db, 'UPDATE chapters SET name=?, color=? WHERE id=?', b.name, b.color, id);
+    found(exec(db, 'UPDATE chapters SET name=?, color=? WHERE id=?', b.name, b.color, id), 'Chapter');
     audit(db, req.actor, 'chapter', id, 'update', `Chapter actualizado: ${b.name}`); res.json({ ok: true });
   });
   r.delete('/chapters/:id', editor, (req, res) => {
     const id = pid(req);
     if (get(db, 'SELECT 1 FROM member_versions WHERE chapter_id=? UNION SELECT 1 FROM vacancies WHERE chapter_id=?', id, id)) throw new HttpError(409, 'El chapter está en uso (actualmente o en el histórico) y no se puede borrar');
-    run(db, 'DELETE FROM chapters WHERE id=?', id); audit(db, req.actor, 'chapter', id, 'delete', 'Chapter borrado'); res.json({ ok: true });
+    found(exec(db, 'DELETE FROM chapters WHERE id=?', id), 'Chapter'); audit(db, req.actor, 'chapter', id, 'delete', 'Chapter borrado'); res.json({ ok: true });
   });
   const gradeBody = z.object({ code: str(20).min(1), description: str(200), level: z.number().int().min(0).max(100) });
   r.post('/grades', editor, (req, res) => {
@@ -96,13 +99,13 @@ export function apiRouter(db: DB): Router {
   r.put('/grades/:id', editor, (req, res) => {
     const b = gradeBody.parse(req.body), id = pid(req);
     if (get(db, 'SELECT 1 FROM grades WHERE code=? AND id<>?', b.code, id)) throw new HttpError(409, 'Ya existe un grado con ese código');
-    run(db, 'UPDATE grades SET code=?, description=?, level=? WHERE id=?', b.code, b.description, b.level, id);
+    found(exec(db, 'UPDATE grades SET code=?, description=?, level=? WHERE id=?', b.code, b.description, b.level, id), 'Grado');
     audit(db, req.actor, 'grade', id, 'update', `Grado actualizado: ${b.code}`); res.json({ ok: true });
   });
   r.delete('/grades/:id', editor, (req, res) => {
     const id = pid(req);
     if (get(db, 'SELECT 1 FROM member_versions WHERE grade_id=? UNION SELECT 1 FROM vacancies WHERE grade_id=?', id, id)) throw new HttpError(409, 'El grado está en uso (actualmente o en el histórico) y no se puede borrar');
-    run(db, 'DELETE FROM grades WHERE id=?', id); audit(db, req.actor, 'grade', id, 'delete', 'Grado borrado'); res.json({ ok: true });
+    found(exec(db, 'DELETE FROM grades WHERE id=?', id), 'Grado'); audit(db, req.actor, 'grade', id, 'delete', 'Grado borrado'); res.json({ ok: true });
   });
 
   /* ---------- miembros ---------- */
@@ -132,10 +135,20 @@ export function apiRouter(db: DB): Router {
     const events = all<{ vacancy_id: number }>(db, 'SELECT vacancy_id,status,at,user_name FROM vacancy_events ORDER BY id');
     res.json(all<{ id: number }>(db, 'SELECT * FROM vacancies ORDER BY opened_at DESC, id DESC').map(v => ({ ...v, events: events.filter(e => e.vacancy_id === v.id) })));
   });
-  const closing = (s?: string) => s === 'Filled' || s === 'Cancelled';
+  const closing = isClosing;
+  /** Comprueba las referencias antes de escribir (si no, SQLite fallaría con un error de clave foránea). */
+  const checkVacancyRefs = (b: z.infer<typeof vacancyBody>) => {
+    if (b.chapter_id != null && !get(db, 'SELECT 1 FROM chapters WHERE id=?', b.chapter_id)) throw new HttpError(400, 'El chapter no existe');
+    if (b.grade_id != null && !get(db, 'SELECT 1 FROM grades WHERE id=?', b.grade_id)) throw new HttpError(400, 'El grado no existe');
+    if (b.manager_id != null) {
+      if (!get(db, 'SELECT 1 FROM members WHERE id=?', b.manager_id)) throw new HttpError(400, 'El manager no existe');
+      if (!versionAt(db, b.manager_id, today())) throw new HttpError(400, 'El manager no está activo');
+    }
+  };
   r.post('/vacancies', editor, (req, res) => {
     const b = vacancyBody.parse(req.body);
     if (!b.code) throw new HttpError(400, 'El código es obligatorio');
+    checkVacancyRefs(b);
     const opened = b.opened_at ?? today(), status = b.status ?? 'Open';
     const id = tx(db, () => {
       const vid = run(db, 'INSERT INTO vacancies(code,title,chapter_id,grade_id,manager_id,status,prf,sap,target_start,comments,opened_at,closed_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)',
@@ -150,12 +163,15 @@ export function apiRouter(db: DB): Router {
     const b = vacancyBody.parse(req.body), id = pid(req);
     const v = get<{ status: string; code: string }>(db, 'SELECT * FROM vacancies WHERE id=?', id);
     if (!v) throw new HttpError(404, 'Vacante no encontrada');
+    if (b.code !== undefined && !b.code) throw new HttpError(400, 'El código es obligatorio');
+    checkVacancyRefs(b);
     tx(db, () => {
       const keys = Object.keys(b) as (keyof typeof b)[];
       if (keys.length) run(db, `UPDATE vacancies SET ${keys.map(k => `${k}=?`).join(',')} WHERE id=?`, ...keys.map(k => b[k] as string | number | null), id);
       if (b.status && b.status !== v.status) {
         run(db, 'INSERT INTO vacancy_events(vacancy_id,status,at,user_name) VALUES(?,?,?,?)', id, b.status, today(), req.actor.name);
-        run(db, 'UPDATE vacancies SET closed_at=? WHERE id=?', closing(b.status) ? today() : null, id);
+        // Al reabrir deja de estar cubierta: se desvincula de la persona que la ocupó.
+        run(db, 'UPDATE vacancies SET closed_at=?, filled_by=CASE WHEN ? THEN filled_by ELSE NULL END WHERE id=?', closing(b.status) ? today() : null, b.status === 'Filled' ? 1 : 0, id);
         audit(db, req.actor, 'vacancy', id, 'status', `Vacante ${v.code}: ${v.status} → ${b.status}`);
       } else audit(db, req.actor, 'vacancy', id, 'update', `Vacante ${v.code} actualizada`, b);
     });
@@ -176,18 +192,18 @@ export function apiRouter(db: DB): Router {
     res.json({ member_id: memberId });
   });
   r.delete('/vacancies/:id', editor, (req, res) => {
-    const id = pid(req); run(db, 'DELETE FROM vacancies WHERE id=?', id); audit(db, req.actor, 'vacancy', id, 'delete', 'Vacante borrada'); res.json({ ok: true });
+    const id = pid(req); found(exec(db, 'DELETE FROM vacancies WHERE id=?', id), 'Vacante'); audit(db, req.actor, 'vacancy', id, 'delete', 'Vacante borrada'); res.json({ ok: true });
   });
 
   /* ---------- reportes ---------- */
   r.get('/reports/timeline', (req, res) => {
-    const to = dateOr(req.query.to, today()), from = dateOr(req.query.from, `${Number(to.slice(0, 4)) - 1}${to.slice(4)}`);
+    const to = dateOr(req.query.to, today()), from = dateOr(req.query.from, addYears(to, -1));
     const g = z.enum(['chapter', 'grade', 'team', 'none']).catch('none').parse(req.query.groupBy);
     if (from > to) throw new HttpError(400, 'El rango de fechas no es válido');
     res.json(timeline(db, from, to, g));
   });
   r.get('/reports/movements', (req, res) => {
-    const to = dateOr(req.query.to, today()), from = dateOr(req.query.from, `${Number(to.slice(0, 4)) - 1}${to.slice(4)}`);
+    const to = dateOr(req.query.to, today()), from = dateOr(req.query.from, addYears(to, -1));
     res.json(movements(db, from, to));
   });
 
@@ -202,10 +218,13 @@ export function apiRouter(db: DB): Router {
   /* ---------- auditoría ---------- */
   r.get('/audit', editor, (req, res) => {
     const limit = Math.min(Number(req.query.limit) || 50, 200), offset = Math.max(Number(req.query.offset) || 0, 0);
-    const q = typeof req.query.q === 'string' && req.query.q ? `%${req.query.q}%` : '%', entity = typeof req.query.entity === 'string' && req.query.entity ? req.query.entity : '%';
+    // Búsqueda literal: los comodines de LIKE que escriba el usuario se escapan; la entidad se compara por igualdad.
+    const q = typeof req.query.q === 'string' && req.query.q ? `%${req.query.q.replace(/[\\%_]/g, c => '\\' + c)}%` : '%';
+    const entity = typeof req.query.entity === 'string' && req.query.entity ? req.query.entity : null;
+    const where = "(? IS NULL OR entity = ?) AND (summary LIKE ? ESCAPE '\\' OR user_name LIKE ? ESCAPE '\\')";
     res.json({
-      total: get<{ n: number }>(db, 'SELECT COUNT(*) AS n FROM audit_log WHERE entity LIKE ? AND (summary LIKE ? OR user_name LIKE ?)', entity, q, q)!.n,
-      items: all(db, 'SELECT * FROM audit_log WHERE entity LIKE ? AND (summary LIKE ? OR user_name LIKE ?) ORDER BY id DESC LIMIT ? OFFSET ?', entity, q, q, limit, offset),
+      total: get<{ n: number }>(db, `SELECT COUNT(*) AS n FROM audit_log WHERE ${where}`, entity, entity, q, q)!.n,
+      items: all(db, `SELECT * FROM audit_log WHERE ${where} ORDER BY id DESC LIMIT ? OFFSET ?`, entity, entity, q, q, limit, offset),
     });
   });
 
@@ -227,6 +246,11 @@ export function apiRouter(db: DB): Router {
     if (b.role !== undefined) run(db, 'UPDATE users SET role=? WHERE id=?', b.role, id);
     if (b.active !== undefined) run(db, 'UPDATE users SET active=? WHERE id=?', b.active ? 1 : 0, id);
     if (b.password !== undefined) run(db, 'UPDATE users SET password_hash=? WHERE id=?', hashPassword(b.password), id);
+    // Cambiar contraseña, rol o estado cierra las sesiones abiertas de ese usuario (salvo la propia, que se renueva).
+    if (b.password !== undefined || (b.role !== undefined && b.role !== u.role) || b.active === false) {
+      run(db, 'UPDATE users SET token_version=token_version+1 WHERE id=?', id);
+      if (id === req.user!.id) setSession(db, res, { id, token_version: u.token_version + 1 });
+    }
     audit(db, req.actor, 'user', id, 'update', `Usuario ${u.email} actualizado (${Object.keys(b).join(', ')})`); res.json({ ok: true });
   });
   return r;

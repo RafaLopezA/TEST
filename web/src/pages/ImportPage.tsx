@@ -59,7 +59,8 @@ export function ImportPage() {
     } catch (e) { setRows(null); setError((e as Error).message || 'No se pudo leer el fichero'); }
   };
   const run = (m: typeof preview, after: (p: ImportPlan) => void) => { setError(''); m.mutate(undefined, { onSuccess: after, onError: e => setError(e.message) }); };
-  const nothing = plan && !plan.create.length && !plan.update.length && !plan.rehire.length && !plan.vacancies.create.length && !plan.vacancies.update.length && !(exitMissing && plan.missing.length);
+  const exitable = plan ? plan.missing.filter(m => m.can_exit).length : 0;
+  const nothing = plan && !plan.create.length && !plan.update.length && !plan.rehire.length && !plan.vacancies.create.length && !plan.vacancies.update.length && !(exitMissing && exitable);
 
   return <>
     <div className="head"><div><h1>Importar</h1><p className="sub">Carga o sincroniza el equipo desde Excel o CSV. Cada diferencia se registra en el histórico con la fecha efectiva indicada.</p></div></div>
@@ -72,12 +73,12 @@ export function ImportPage() {
     {rows && <Card title="2 · Opciones" style={{ marginTop: 16 }}>
       <div className="toolbar" style={{ margin: 0 }}>
         <label className="asof">Fecha efectiva de los cambios <input type="date" value={date} onChange={e => { if (e.target.value) { setDate(e.target.value); setPlan(null); } }} /></label>
-        <label className="chk"><input type="checkbox" checked={exitMissing} onChange={e => setExitMissing(e.target.checked)} /> Dar de baja a quien no aparezca en el fichero</label>
+        <label className="chk"><input type="checkbox" checked={exitMissing} onChange={e => { setExitMissing(e.target.checked); setDone(false); }} /> Dar de baja a quien no aparezca en el fichero</label>
         <button className="btn primary" disabled={preview.isPending} onClick={() => run(preview, p => { setPlan(p); setDone(false); })}>{preview.isPending ? 'Calculando…' : 'Previsualizar cambios'}</button>
       </div></Card>}
     {plan && <Card title={done ? '✅ Importación aplicada' : '3 · Previsualización'} style={{ marginTop: 16 }}>
       <div className="grid kpis"><Kpi value={plan.create.length} label="Altas" /><Kpi value={plan.update.length} label="Personas con cambios" /><Kpi value={plan.unchanged} label="Sin cambios" />
-        <Kpi value={plan.missing.length} label="No aparecen en el fichero" hint={exitMissing ? 'se darán de baja' : 'no se tocan'} /><Kpi value={plan.vacancies.create.length + plan.vacancies.update.length} label="Vacantes nuevas o modificadas" /></div>
+        <Kpi value={plan.missing.length} label="No aparecen en el fichero" hint={done && exitMissing ? `${plan.exited} dados de baja` : exitMissing ? `se darán de baja ${exitable}` : 'no se tocan'} /><Kpi value={plan.vacancies.create.length + plan.vacancies.update.length} label="Vacantes nuevas o modificadas" /></div>
       {(plan.newChapters.length > 0 || plan.newGrades.length > 0 || plan.placeholders.length > 0) && <p>
         {plan.newChapters.length > 0 && <>Chapters nuevos: {plan.newChapters.map(c => <Pill key={c}>{c}</Pill>)} </>}
         {plan.newGrades.length > 0 && <>Grados nuevos: {plan.newGrades.map(c => <Pill key={c}>{c}</Pill>)} </>}
@@ -87,7 +88,9 @@ export function ImportPage() {
       {plan.create.length > 0 && <><h3>Altas</h3><div className="tw scroll"><table><thead><tr><th>Persona</th><th>Chapter</th><th>Grado</th><th>Manager</th></tr></thead><tbody>
         {plan.create.map((c, i) => <tr key={i}><td>{c.name}</td><td>{c.chapter}</td><td>{c.grade}</td><td>{c.manager}</td></tr>)}</tbody></table></div></>}
       {plan.rehire.length > 0 && <p>Reincorporaciones: {plan.rehire.map(r => <Pill key={r.id}>{r.name}</Pill>)}</p>}
-      {plan.missing.length > 0 && <><h3>No aparecen en el fichero</h3><div className="chips">{plan.missing.map(m => <span key={m.id} className="chip">{m.name}</span>)}</div></>}
+      {plan.missing.length > 0 && <><h3>No aparecen en el fichero</h3><div className="chips">{plan.missing.map(m => <span key={m.id} className="chip">{m.name}{exitMissing && !m.can_exit && ' · no se puede dar de baja con esta fecha'}</span>)}</div></>}
+      {plan.skipped.length > 0 && <><h3>Filas que no se aplican</h3><div className="tw scroll"><table><thead><tr><th>Fila</th><th>Motivo</th></tr></thead><tbody>
+        {plan.skipped.map((s, i) => <tr key={i}><td>{s.name}</td><td className="wrap">{s.reason}</td></tr>)}</tbody></table></div></>}
       {nothing && <Empty>El fichero coincide con los datos actuales: no hay nada que aplicar.</Empty>}
       {!done && !nothing && <div className="form-actions"><button className="btn primary" disabled={apply.isPending} onClick={() => run(apply, p => { setPlan(p); setDone(true); toast('Importación aplicada'); })}>{apply.isPending ? 'Aplicando…' : `Aplicar con fecha ${date}`}</button></div>}
     </Card>}

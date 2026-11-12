@@ -4,9 +4,9 @@ import { useMovements, useTimeline, useVacancies } from '../api';
 import { useApp } from '../ctx';
 import { useOrg } from '../hooks';
 import { Bars, Card, Donut, Empty, Kpi, PALETTE, Pill, addYears, avg, disp, fmtDate, fmtMonth, yearsBetween } from '../ui';
+import { VAC_COLOR, vacanciesAt } from '../vac';
 import { MOVE } from './Reports';
 
-export const VAC_COLOR: Record<string, string> = { 'Pending PRF': '#a05bf0', Open: '#f5a524', Recruiting: '#0091ff', Offer: '#12a594', Filled: '#30a46c', Cancelled: '#999999' };
 
 export function Dashboard() {
   const { meta, asOf, chapter, seniorLevel, grade } = useApp();
@@ -15,13 +15,16 @@ export function Dashboard() {
   const { data: tl = [] } = useTimeline(from, asOf, 'chapter');
   const { data: moves = [] } = useMovements(from, asOf);
   const { data: vacancies = [] } = useVacancies();
-  const open = vacancies.filter(v => v.opened_at <= asOf && (!v.closed_at || v.closed_at > asOf));
+  const { open } = vacanciesAt(vacancies, asOf, meta.today);
   const exits = moves.filter(m => m.type === 'exit').length, hires = moves.filter(m => m.type === 'hire' || m.type === 'rehire').length;
   const avgHc = avg(tl.map(p => p.total)) || 1, delta = tl.length ? active.length - tl[0].total : 0;
   const spans = [...reports.values()].map(r => r.length);
   const seniors = seniorLevel == null ? null : active.filter(m => (grade(m.grade_id)?.level ?? 0) >= seniorLevel).length;
   const teams = [...new Set(active.map(m => m.team_id).filter((t): t is number => t != null))];
-  const series = tl.map(p => ({ date: fmtMonth(p.date), ...Object.fromEntries(meta.chapters.map(c => [c.name, p.groups[c.id] ?? 0])), Altas: p.hires, Bajas: p.exits }));
+  // Las personas sin chapter o sin grado (p. ej. managers creados por una importación) también cuentan: se muestran como "Sin chapter/grado".
+  const NONE = '#9aa0b4', noChapter = active.filter(m => chapter(m.chapter_id) == null).length, noGrade = active.filter(m => grade(m.grade_id) == null).length;
+  const areas = [...meta.chapters.map(c => ({ key: String(c.id), name: c.name, color: c.color })), ...(tl.some(p => p.groups['0']) ? [{ key: '0', name: 'Sin chapter', color: NONE }] : [])];
+  const series = tl.map(p => ({ date: fmtMonth(p.date), ...Object.fromEntries(areas.map(a => [a.name, p.groups[a.key] ?? 0])), Altas: p.hires, Bajas: p.exits }));
 
   return <>
     <div className="head"><div><h1>Resumen</h1><p className="sub">Situación a {fmtDate(asOf)} y evolución de los últimos 12 meses</p></div></div>
@@ -36,10 +39,10 @@ export function Dashboard() {
       <Card title="Evolución del headcount por chapter" style={{ gridColumn: '1/-1' }}>
         <div className="chart"><ResponsiveContainer><AreaChart data={series} margin={{ left: -18, right: 8, top: 6 }}>
           <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" /><XAxis dataKey="date" fontSize={12} /><YAxis fontSize={12} allowDecimals={false} /><Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10 }} /><Legend />
-          {meta.chapters.map(c => <Area key={c.id} isAnimationActive={false} type="monotone" dataKey={c.name} stackId="1" stroke={c.color} fill={c.color} fillOpacity={0.55} />)}
+          {areas.map(a => <Area key={a.key} isAnimationActive={false} type="monotone" dataKey={a.name} stackId="1" stroke={a.color} fill={a.color} fillOpacity={0.55} />)}
         </AreaChart></ResponsiveContainer></div></Card>
-      <Card title="Personas por chapter"><Bars items={meta.chapters.map(c => ({ label: c.name, value: active.filter(m => m.chapter_id === c.id).length, color: c.color }))} /></Card>
-      <Card title="Distribución por grado"><Donut items={meta.grades.map(g => ({ label: `${g.code}${g.description ? ' · ' + g.description : ''}`, value: active.filter(m => m.grade_id === g.id).length }))} /></Card>
+      <Card title="Personas por chapter"><Bars items={[...meta.chapters.map(c => ({ label: c.name, value: active.filter(m => m.chapter_id === c.id).length, color: c.color })), ...(noChapter ? [{ label: 'Sin chapter', value: noChapter, color: NONE }] : [])]} /></Card>
+      <Card title="Distribución por grado"><Donut items={[...meta.grades.map(g => ({ label: `${g.code}${g.description ? ' · ' + g.description : ''}`, value: active.filter(m => m.grade_id === g.id).length })), ...(noGrade ? [{ label: 'Sin grado', value: noGrade, color: NONE }] : [])]} /></Card>
       <Card title="Altas y bajas por mes"><div className="chart sm"><ResponsiveContainer><BarChart data={series} margin={{ left: -24, right: 8, top: 6 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" /><XAxis dataKey="date" fontSize={12} /><YAxis fontSize={12} allowDecimals={false} /><Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--line)', borderRadius: 10 }} /><Legend />
         <Bar isAnimationActive={false} dataKey="Altas" fill="#12a594" radius={[4, 4, 0, 0]} /><Bar isAnimationActive={false} dataKey="Bajas" fill="#e5484d" radius={[4, 4, 0, 0]} /></BarChart></ResponsiveContainer></div></Card>
